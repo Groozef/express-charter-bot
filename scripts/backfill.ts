@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { dirname } from 'path';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import { Api } from 'telegram/tl';
@@ -6,8 +8,24 @@ import { Telegraf } from 'telegraf';
 import { TransformerService } from '../src/transformer/transformer.service';
 import { AppConfigService } from '../src/config/app-config.service';
 
+const MAX_PROCESSED_IDS = 500;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Пишем в тот же state.json, что использует живой пайплайн (StateService) — иначе после
+// бэкфилла опрос (polling) в UserbotService посчитает эти же сообщения "новыми" и продублирует их.
+function loadProcessedIds(stateFilePath: string): Set<number> {
+  if (!existsSync(stateFilePath)) return new Set();
+  const raw = JSON.parse(readFileSync(stateFilePath, 'utf-8'));
+  return new Set<number>(raw.processedIds ?? []);
+}
+
+function saveProcessedIds(stateFilePath: string, ids: Set<number>): void {
+  mkdirSync(dirname(stateFilePath), { recursive: true });
+  const trimmed = [...ids].slice(-MAX_PROCESSED_IDS);
+  writeFileSync(stateFilePath, JSON.stringify({ processedIds: trimmed }), 'utf-8');
 }
 
 async function main() {
@@ -40,6 +58,8 @@ async function main() {
   await client.connect();
 
   const bot = new Telegraf(botToken);
+  const stateFilePath = process.env.STATE_FILE_PATH ?? './data/state.json';
+  const processedIds = loadProcessedIds(stateFilePath);
 
   console.log(`Забираю последние ${count} сообщений из ${sourceChannelId}...`);
   const messages = await client.getMessages(sourceChannelId, { limit: count });
@@ -57,6 +77,7 @@ async function main() {
 
     if (composed === null) {
       console.log(`[id=${message.id}] без ссылки WhatsApp — не предложение тура, пропускаю`);
+      processedIds.add(message.id);
       continue;
     }
 
@@ -84,6 +105,7 @@ async function main() {
         await bot.telegram.sendMessage(targetChannelId, composed, { parse_mode: 'HTML' });
       }
       console.log(`[id=${message.id}] опубликовано`);
+      processedIds.add(message.id);
     } catch (error) {
       console.error(`[id=${message.id}] ошибка публикации: ${(error as Error).message}`);
     }
@@ -91,6 +113,7 @@ async function main() {
     await sleep(2500); // пауза между постами, чтобы не словить flood-wait от Bot API
   }
 
+  saveProcessedIds(stateFilePath, processedIds);
   await client.disconnect();
   console.log('Готово.');
   process.exit(0);
