@@ -29,7 +29,7 @@ describe('TransformerService', () => {
     ].join('\n');
 
     const result = await service.compose(raw);
-    const lines = result.split('\n');
+    const lines = (result ?? '').split('\n');
 
     expect(result).toContain('02.07 A (03:20-06:50) 60 000🔥');
     expect(result).not.toContain('AviaTravel.kz');
@@ -38,7 +38,7 @@ describe('TransformerService', () => {
       `<a href="wa.me/77784949562?text=${encodeURIComponent(trackingText)}">${linkLabel}</a>`,
     );
     // закодированный текст живёт только внутри href, Telegram его не покажет — видимый текст только label
-    const visibleText = result.replace(/<a href="[^"]*">/g, '').replace(/<\/a>/g, '');
+    const visibleText = (result ?? '').replace(/<a href="[^"]*">/g, '').replace(/<\/a>/g, '');
     expect(visibleText).not.toContain('%D0%97');
     expect(visibleText).toContain(linkLabel);
 
@@ -63,9 +63,14 @@ describe('TransformerService', () => {
     );
   });
 
-  it('не трогает сообщения без wa.me ссылок (кроме экранирования) и не добавляет подпись', async () => {
+  it('возвращает null для сообщений без wa.me-ссылки (это не предложение тура — промо/напоминалка источника, не публикуем)', async () => {
     const service = makeService('ref GRZ', 'LABEL', 'FOOTER');
-    const raw = 'Просто текст без ссылок и цен';
-    expect(await service.compose(raw)).toBe(raw);
+    const raw = [
+      '❓ Как проверить турагентство перед покупкой Тура?',
+      'Смотрите короткое видео — всего 2 минуты, и вы сможете защитить себя от мошенников.',
+      'Видео: share.kz/gvmA',
+    ].join('\n');
+
+    expect(await service.compose(raw)).toBeNull();
   });
 });

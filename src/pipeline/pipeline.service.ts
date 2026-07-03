@@ -28,6 +28,12 @@ export class PipelineService {
     this.rawLog.append(message);
     const text = await this.transformer.compose(message.text);
 
+    if (text === null) {
+      this.state.markProcessed(message.id);
+      this.logger.log(`Сообщение ${message.id} без ссылки WhatsApp — не предложение тура, пропускаем публикацию`);
+      return;
+    }
+
     try {
       if (message.media) {
         if (message.media.isPhoto) {

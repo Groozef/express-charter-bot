@@ -20,19 +20,23 @@ export class TransformerService {
   // 2) строка с чужой рекламой (их канал/сайт) вырезается.
   // 3) прямо перед строкой с WhatsApp добавляется короткое напоминание про два
   // обязательных пункта заявки — чтобы было видно сразу в посте, а не только после клика.
-  async compose(rawText: string): Promise<string> {
+  //
+  // Возвращает null, если в сообщении нет wa.me-ссылки — значит это не предложение тура,
+  // а промо/напоминалка источника (реклама их видео-обзоров и т.п.), публиковать не нужно.
+  async compose(rawText: string): Promise<string | null> {
     return this.tagWhatsappLinks(rawText ?? '');
   }
 
-  private tagWhatsappLinks(text: string): string {
+  private tagWhatsappLinks(text: string): string | null {
     const rawLinks = [...new Set(text.match(WA_ME_LINK) ?? [])];
+
+    if (rawLinks.length === 0) {
+      return null;
+    }
+
     // экранируем всегда, а не только когда есть ссылка — сообщение в любом случае уходит
     // с parse_mode: 'HTML', и случайный "<"/"&" в посте источника не должен ломать парсинг
     let html = this.escapeHtml(text);
-
-    if (rawLinks.length === 0) {
-      return html;
-    }
 
     const tag = encodeURIComponent(this.config.whatsappTrackingText);
 

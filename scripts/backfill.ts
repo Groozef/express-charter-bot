@@ -55,6 +55,11 @@ async function main() {
 
     const composed = await transformer.compose(text);
 
+    if (composed === null) {
+      console.log(`[id=${message.id}] без ссылки WhatsApp — не предложение тура, пропускаю`);
+      continue;
+    }
+
     // MessageMediaWebPage — превьюшка ссылки (например, аватарка WhatsApp-контакта), не настоящее медиа поста
     const isRealMedia =
       message.media instanceof Api.MessageMediaPhoto || message.media instanceof Api.MessageMediaDocument;
