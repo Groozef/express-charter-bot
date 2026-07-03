@@ -12,12 +12,14 @@ export const SOURCE_MESSAGE_EVENT = 'source.message';
 const WATCHDOG_INTERVAL_MS = 30_000;
 const MAX_CONSECUTIVE_DISCONNECTS = 3; // ~90 секунд без связи — считаем сессию мёртвой
 const INITIAL_CONNECT_TIMEOUT_MS = 60_000; // сторож включается только ПОСЛЕ connect(), поэтому сам connect() тоже нужно ограничивать по времени
+const POLL_INTERVAL_MS = 60_000;
 
 @Injectable()
 export class UserbotService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(UserbotService.name);
   private client: TelegramClient;
   private watchdog: NodeJS.Timeout;
+  private poller: NodeJS.Timeout;
   private consecutiveDisconnects = 0;
 
   constructor(
@@ -45,7 +47,7 @@ export class UserbotService implements OnModuleInit, OnModuleDestroy {
     await this.connectWithTimeout();
 
     this.client.addEventHandler(
-      (event: NewMessageEvent) => this.onSourceMessage(event),
+      (event: NewMessageEvent) => this.processMessage(event.message),
       new NewMessage({ chats: [this.config.sourceChannelId] }),
     );
 
@@ -54,10 +56,18 @@ export class UserbotService implements OnModuleInit, OnModuleDestroy {
     // страховка: если клиент всё же надолго зависнет в разрыве соединения (баг/edge-case
     // в переподключении GramJS), роняем процесс — docker перезапустит контейнер с чистого листа
     this.watchdog = setInterval(() => this.checkConnection(), WATCHDOG_INTERVAL_MS);
+
+    // страховка №2: живой NewMessage-поток иногда молча ничего не присылает, хотя соединение
+    // выглядит рабочим (getMessages при этом отрабатывает нормально) — похоже на тихий обрыв
+    // серверного push-канала (NAT/firewall), который не триггерит переподключение. Поэтому
+    // параллельно раз в минуту опрашиваем канал напрямую — дубликаты безопасны, PipelineService
+    // сам отсеет уже обработанные id через StateService.
+    this.poller = setInterval(() => this.pollRecentMessages(), POLL_INTERVAL_MS);
   }
 
   async onModuleDestroy(): Promise<void> {
     clearInterval(this.watchdog);
+    clearInterval(this.poller);
     await this.client?.disconnect();
   }
 
@@ -91,9 +101,20 @@ export class UserbotService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async onSourceMessage(event: NewMessageEvent): Promise<void> {
-    const message = event.message;
+  private async pollRecentMessages(): Promise<void> {
+    if (!this.client?.connected) return;
 
+    try {
+      const messages = await this.client.getMessages(this.config.sourceChannelId, { limit: 5 });
+      for (const message of [...messages].reverse()) {
+        await this.processMessage(message);
+      }
+    } catch (error) {
+      this.logger.warn(`Не удалось опросить канал-источник: ${(error as Error).message}`);
+    }
+  }
+
+  private async processMessage(message: Api.Message): Promise<void> {
     try {
       const payload: SourceMessage = {
         id: message.id,
