@@ -1,0 +1,12 @@
+services:
+  bot:
+    build: .
+    container_name: hot-tours-relay-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    ports:
+      - "3000:3000"

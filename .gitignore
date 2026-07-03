@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+data/
+logs/
+.env
+*.session
+npm-debug.log*
